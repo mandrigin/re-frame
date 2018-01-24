@@ -1,6 +1,6 @@
 (ns re-frame.router
   (:require [re-frame.events  :refer [handle]]
-            [re-frame.interop :refer [after-render empty-queue next-tick]]
+            [re-frame.interop :refer [after-render empty-queue next-tick now]]
             [re-frame.loggers :refer [console]]
             [re-frame.trace   :as trace :include-macros true]))
 
@@ -86,7 +86,11 @@
   (-exception [this ex])
   (-pause [this later-fn])
   (-resume [this])
-  (-call-post-event-callbacks [this event]))
+  (-call-post-event-callbacks [this event])
+
+  ;; -- Perf Metrics
+  (-print-perf-queue-size-if-needed [queue])
+  (-print-perf-timings-if-needed [_ before-exec-t scheduled-t after-exec-t]))
 
 
 ;; Concrete implementation of IEventQueue
@@ -98,7 +102,7 @@
   ;; -- API ------------------------------------------------------------------
 
   (push [this event]         ;; presumably called by dispatch
-    (-fsm-trigger this :add-event event))
+    (-fsm-trigger this :add-event [event (now)]))
 
   ;; register a callback function which will be called after each event is processed
   (add-post-event-callback [_ id callback-fn]
@@ -166,17 +170,22 @@
 
   (-add-event
     [_ event]
-    (set! queue (conj queue event)))
+    (set! queue (conj queue event))
+    (-print-perf-queue-size-if-needed queue))
 
   (-process-1st-event-in-queue
     [this]
-    (let [event-v (peek queue)]
-      (try
-        (handle event-v)
-        (set! queue (pop queue))
-        (-call-post-event-callbacks this event-v)
+    (let [event-time (peek queue)]
+      (let [event-v (first event-time) scheduled-t (last event-time)]
+        (try
+          (let [before-exec-t (now)]
+            (handle event-v)
+            (-print-perf-timings-if-needed this before-exec-t scheduled-t (now))
+
+            (set! queue (pop queue))
+            (-call-post-event-callbacks this event-v))
         (catch #?(:cljs :default :clj Exception) ex
-          (-fsm-trigger this :exception ex)))))
+          (-fsm-trigger this :exception ex))))))
 
   (-run-next-tick
     [this]
@@ -211,7 +220,27 @@
   (-resume
     [this]
     (-process-1st-event-in-queue this)  ;; do the event which paused processing
-    (-run-queue this)))                 ;; do the rest of the queued events
+    (-run-queue this))                 ;; do the rest of the queued events
+
+
+  ;; Throughput measuring methods
+  ;; Should be used for debugging
+  (-print-perf-timings-if-needed
+    [_ before-exec-t scheduled-t after-exec-t]
+    (let [execution-t (- after-exec-t before-exec-t) throughput-t (- after-exec-t scheduled-t)]
+      (if (> execution-t 100)
+        (println "[DEBUG / IGORM]"
+                 "QUEUE ITEM EXECUTION TIME IS > 100ms:" execution-t))
+      (if (> throughput-t 300)
+        (println "[DEBUG / IGORM]"
+                 "QUEUE THROUGHPUT TIME IS > 300ms:" throughput-t))))
+
+  (-print-perf-queue-size-if-needed
+    [queue]
+    (let [qcount (count queue)]
+      (if (> qcount 100)
+        (println "[DEBUG / IGORM]"
+                 "QUEUE HAS GROWN TOO MUCH:" qcount)))))
 
 
 ;; ---------------------------------------------------------------------------
