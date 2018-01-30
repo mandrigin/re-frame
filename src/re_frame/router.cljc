@@ -89,8 +89,8 @@
   (-call-post-event-callbacks [this event])
 
   ;; -- Perf Metrics
-  (-print-perf-queue-size-if-needed [queue])
-  (-print-perf-timings-if-needed [_ before-exec-t scheduled-t after-exec-t]))
+  (-print-perf-queue-size-if-needed [this queue])
+  (-print-perf-timings-if-needed [this before-exec-t scheduled-t after-exec-t]))
 
 
 ;; Concrete implementation of IEventQueue
@@ -169,9 +169,9 @@
         (when action-fn (action-fn)))))
 
   (-add-event
-    [_ event]
+    [this event]
     (set! queue (conj queue event))
-    (-print-perf-queue-size-if-needed queue))
+    (-print-perf-queue-size-if-needed this queue))
 
   (-process-1st-event-in-queue
     [this]
@@ -226,7 +226,7 @@
   ;; Throughput measuring methods
   ;; Should be used for debugging
   (-print-perf-timings-if-needed
-    [_ before-exec-t scheduled-t after-exec-t]
+    [this before-exec-t scheduled-t after-exec-t]
     (let [execution-t (- after-exec-t before-exec-t) throughput-t (- after-exec-t scheduled-t)]
       (if (> execution-t 100)
         (println "[DEBUG / IGORM]"
@@ -236,7 +236,7 @@
                  "QUEUE THROUGHPUT TIME IS > 300ms:" throughput-t))))
 
   (-print-perf-queue-size-if-needed
-    [queue]
+    [this queue]
     (let [qcount (count queue)]
       (if (> qcount 100)
         (println "[DEBUG / IGORM]"
