@@ -211,11 +211,11 @@
       (if (> (- (now) before-tick-t) 300)
         (println "[DEBUG / RE-FRAME-PERF]"
                  "TICK TOOK TOO LONG:"  (- (now) before-tick-t) "ms."
-                 "TICK HISTORY***\n"
+                 "TICK HISTORY (newest at the top)***\n"
                  (-get-history this)
                  "\n***TICK HISTORY"))
     )
-    (-clear-history this))
+    (-store-to-history this "===NEW-TICK===" 0))
 
   (-exception
     [_ ex]
@@ -254,7 +254,7 @@
         (println "[DEBUG / RE-FRAME-PERF]"
                  "QUEUE THROUGHPUT TIME IS > 300ms:" throughput-t "ms."
                  "EVENT" event-name
-                 "TICK HISTORY***\n"
+                 "TICK HISTORY (newest at the top)***\n"
                  (-get-history this)
                  "\n***TICK HISTORY"))))
 
@@ -268,15 +268,19 @@
 
   (-store-to-history
     [this event-name execution-t]
-    (set! history (conj history [event-name execution-t])))
+
+    (set! history (conj history [event-name execution-t]))
+    (if (> (count history) 100)
+      (set! history (pop history))))
 
   (-clear-history
     [this]
     (set! history empty-queue))
 
+  ;; Stringified, newest to oldest
   (-get-history
     [this]
-    (clojure.string/join "\n" history)))
+    (clojure.string/join "\n" (reverse history))))
 
 
 ;; ---------------------------------------------------------------------------
