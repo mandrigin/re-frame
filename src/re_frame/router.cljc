@@ -90,12 +90,16 @@
 
   ;; -- Perf Metrics
   (-print-perf-queue-size-if-needed [this queue])
-  (-print-perf-timings-if-needed [this before-exec-t scheduled-t after-exec-t]))
+  (-print-perf-timings-if-needed [this before-exec-t scheduled-t after-exec-t event-v])
+  (-store-to-history [this event-name execution-t])
+  (-clear-history [this])
+  (-get-history [this]))
 
 
 ;; Concrete implementation of IEventQueue
 (deftype EventQueue [#?(:cljs ^:mutable fsm-state               :clj ^:volatile-mutable fsm-state)
                      #?(:cljs ^:mutable queue                   :clj ^:volatile-mutable queue)
+                     #?(:cljs ^:mutable history                 :clj ^:volatile-mutable history)
                      #?(:cljs ^:mutable post-event-callback-fns :clj ^:volatile-mutable post-event-callback-fns)]
   IEventQueue
 
@@ -180,7 +184,7 @@
         (try
           (let [before-exec-t (now)]
             (handle event-v)
-            (-print-perf-timings-if-needed this before-exec-t scheduled-t (now))
+            (-print-perf-timings-if-needed this before-exec-t scheduled-t (now) event-v)
 
             (set! queue (pop queue))
             (-call-post-event-callbacks this event-v))
@@ -195,13 +199,23 @@
   ;; Be aware that events might have metadata which will pause processing.
   (-run-queue
     [this]
-    (loop [n (count queue)]
-      (if (zero? n)
-        (-fsm-trigger this :finish-run nil)
-        (if-let [later-fn (some later-fns (-> queue peek meta keys))]  ;; any metadata which causes pausing?
-          (-fsm-trigger this :pause later-fn)
-          (do (-process-1st-event-in-queue this)
-              (recur (dec n)))))))
+
+    (let [before-tick-t (now)]
+      (loop [n (count queue)]
+        (if (zero? n)
+          (-fsm-trigger this :finish-run nil)
+          (if-let [later-fn (some later-fns (-> queue peek meta keys))]  ;; any metadata which causes pausing?
+            (-fsm-trigger this :pause later-fn)
+            (do (-process-1st-event-in-queue this)
+                (recur (dec n))))))
+      (if (> (- (now) before-tick-t) 300)
+        (println "[DEBUG / IGORM]"
+                 "TICK TOOK TOO LONG:"  (- (now) before-tick-t) "ms."
+                 "TICK HISTORY***\n"
+                 (-get-history this)
+                 "\n***TICK HISTORY"))
+    )
+    (-clear-history this))
 
   (-exception
     [_ ex]
@@ -226,21 +240,42 @@
   ;; Throughput measuring methods
   ;; Should be used for debugging
   (-print-perf-timings-if-needed
-    [this before-exec-t scheduled-t after-exec-t]
-    (let [execution-t (- after-exec-t before-exec-t) throughput-t (- after-exec-t scheduled-t)]
+    [this before-exec-t scheduled-t after-exec-t event-v]
+
+    (let [execution-t (- after-exec-t before-exec-t) 
+          throughput-t (- after-exec-t scheduled-t)
+          event-name (first event-v)]
+      (-store-to-history this event-name execution-t)
       (if (> execution-t 100)
         (println "[DEBUG / IGORM]"
-                 "QUEUE ITEM EXECUTION TIME IS > 100ms:" execution-t))
+                 "QUEUE ITEM EXECUTION TIME IS > 100ms:" execution-t "ms."
+                 "EVENT" event-name))
       (if (> throughput-t 300)
         (println "[DEBUG / IGORM]"
-                 "QUEUE THROUGHPUT TIME IS > 300ms:" throughput-t))))
+                 "QUEUE THROUGHPUT TIME IS > 300ms:" throughput-t "ms."
+                 "EVENT" event-name
+                 "TICK HISTORY***\n"
+                 (-get-history this)
+                 "\n***TICK HISTORY"))))
 
   (-print-perf-queue-size-if-needed
     [this queue]
     (let [qcount (count queue)]
       (if (> qcount 100)
         (println "[DEBUG / IGORM]"
-                 "QUEUE HAS GROWN TOO MUCH:" qcount)))))
+                 "QUEUE HAS GROWN TOO MUCH:" qcount))))
+
+  (-store-to-history
+    [this event-name execution-t]
+    (set! history (conj history [event-name execution-t])))
+
+  (-clear-history
+    [this]
+    (set! history empty-queue))
+
+  (-get-history
+    [this]
+    (clojure.string/join "\n" history)))
 
 
 ;; ---------------------------------------------------------------------------
@@ -248,7 +283,7 @@
 ;; When "dispatch" is called, the event is added into this event queue.  Later,
 ;;  the queue will "run" and the event will be "handled" by the registered function.
 ;;
-(def event-queue (->EventQueue :idle empty-queue {}))
+(def event-queue (->EventQueue :idle empty-queue empty-queue {}))
 
 
 ;; ---------------------------------------------------------------------------
