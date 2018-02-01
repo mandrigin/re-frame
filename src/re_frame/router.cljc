@@ -89,7 +89,7 @@
   (-call-post-event-callbacks [this event])
 
   ;; -- Perf Metrics
-  (-print-perf-queue-size-if-needed [this queue])
+  (-print-perf-queue-size-if-needed [this queue event-v])
   (-print-perf-timings-if-needed [this before-exec-t scheduled-t after-exec-t event-v])
   (-store-to-history [this event-name execution-t])
   (-clear-history [this])
@@ -175,7 +175,7 @@
   (-add-event
     [this event]
     (set! queue (conj queue event))
-    (-print-perf-queue-size-if-needed this queue))
+    (-print-perf-queue-size-if-needed this queue event))
 
   (-process-1st-event-in-queue
     [this]
@@ -209,7 +209,7 @@
             (do (-process-1st-event-in-queue this)
                 (recur (dec n))))))
       (if (> (- (now) before-tick-t) 300)
-        (println "[DEBUG / IGORM]"
+        (println "[DEBUG / RE-FRAME-PERF]"
                  "TICK TOOK TOO LONG:"  (- (now) before-tick-t) "ms."
                  "TICK HISTORY***\n"
                  (-get-history this)
@@ -247,11 +247,11 @@
           event-name (first event-v)]
       (-store-to-history this event-name execution-t)
       (if (> execution-t 100)
-        (println "[DEBUG / IGORM]"
+        (println "[DEBUG / RE-FRAME-PERF]"
                  "QUEUE ITEM EXECUTION TIME IS > 100ms:" execution-t "ms."
                  "EVENT" event-name))
       (if (> throughput-t 300)
-        (println "[DEBUG / IGORM]"
+        (println "[DEBUG / RE-FRAME-PERF]"
                  "QUEUE THROUGHPUT TIME IS > 300ms:" throughput-t "ms."
                  "EVENT" event-name
                  "TICK HISTORY***\n"
@@ -259,11 +259,12 @@
                  "\n***TICK HISTORY"))))
 
   (-print-perf-queue-size-if-needed
-    [this queue]
+    [this queue event-v]
     (let [qcount (count queue)]
       (if (> qcount 100)
-        (println "[DEBUG / IGORM]"
-                 "QUEUE HAS GROWN TOO MUCH:" qcount))))
+        (println "[DEBUG / RE-FRAME-PERF]"
+                 "QUEUE HAS GROWN TOO MUCH:" qcount
+                 "CURRENT EVENT:" (first event-v)))))
 
   (-store-to-history
     [this event-name execution-t]
